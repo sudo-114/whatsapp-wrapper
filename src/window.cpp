@@ -114,6 +114,21 @@ void StartWebView() {
                             if (FAILED(controllerResult) || !controller) return controllerResult;
                             g_controller = controller;
                             g_controller->get_CoreWebView2(&g_webview);
+
+                            ComPtr<ICoreWebView2Settings> settings;
+                            if (SUCCEEDED(g_webview->get_Settings(&settings)) && settings) {
+                                ComPtr<ICoreWebView2Settings2> settings2;
+
+                                if (SUCCEEDED(settings.As(&settings2)) && settings2) {
+                                    settings2->put_UserAgent(
+                                        L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                        L"AppleWebKit/537.36 (KHTML, like Gecko) "
+                                        L"Chrome/155.0.0.0 Safari/537.36 "
+                                        L"Edg/155.0.0.0"
+                                    );
+                                }
+                            }
+
                             ResizeWebView();
 
                             ComPtr<ICoreWebView2Settings> settings;
