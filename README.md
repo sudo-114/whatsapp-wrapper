@@ -6,7 +6,8 @@ A minimal Windows desktop wrapper for `https://web.whatsapp.com/`, written in C+
 
 - WebView2 window with persistent profile storage.
 - Account 1 and Account 2 profile folders.
-- System tray icon, minimize-to-tray, restore, and Exit menu.
+- Custom app icon embedded in the executable and used by the system tray.
+- System tray icon visible from startup, minimize/close-to-tray, restore, and Exit menu.
 - Reload and zoom commands.
 - GitHub Actions Windows build workflow.
 
@@ -26,7 +27,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\build.ps1
 ```
 
-Expected output: `build\Release\WhatsAppWrapper.exe`.
+Expected output: `build\\Release\\WhatsAppWrapper.exe`.
 
 ## Build with GitHub Actions
 
@@ -41,14 +42,14 @@ Run one instance with the default profile and another with:
 .\WhatsAppWrapper.exe --profile account2
 ```
 
-The profiles are stored under `%LOCALAPPDATA%\WhatsAppWrapper\account1` and
-`%LOCALAPPDATA%\WhatsAppWrapper\account2`.
+The profiles are stored under `%LOCALAPPDATA%\\WhatsAppWrapper\\account1` and
+`%LOCALAPPDATA%\\WhatsAppWrapper\\account2`.
 
 ## Important limitations
 
 This is a starter project and has not been compiled or tested on Windows in this environment.
 Validate the WebView2 SDK package layout and CMake library path against the version downloaded.
-Native Windows toast notifications and unread-count integration are not implemented here.
+Native Windows toast notifications and unread-count integration are not implemented here. The bundled icon is a custom generic messaging icon, not an official WhatsApp logo.
 Web notifications depend on WhatsApp Web, WebView2 support, and Windows notification settings.
 The tray menu lets you switch the current window's profile, but separate concurrent accounts
 are better launched as two processes using `--profile account1` and `--profile account2`.

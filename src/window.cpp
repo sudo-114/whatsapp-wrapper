@@ -7,6 +7,7 @@
 #include <wrl.h>
 #include <WebView2.h>
 #include "window.h"
+#include "resource.h"
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -28,8 +29,9 @@ ComPtr<ICoreWebView2Controller> g_controller;
 ComPtr<ICoreWebView2> g_webview;
 ComPtr<ICoreWebView2Environment> g_environment;
 std::wstring g_profile;
-bool g_quitting = false;
 bool g_trayAdded = false;
+HINSTANCE g_instance = nullptr;
+HICON g_trayIcon = nullptr;
 
 std::wstring ProfilePath(const wchar_t* profileName) {
     wchar_t localAppData[MAX_PATH]{};
@@ -76,7 +78,13 @@ void AddTrayIcon() {
     g_nid.uID = ID_TRAY;
     g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAY;
-    g_nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    if (!g_trayIcon) {
+        g_trayIcon = static_cast<HICON>(LoadImageW(
+            g_instance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
+            LR_DEFAULTCOLOR));
+    }
+    g_nid.hIcon = g_trayIcon ? g_trayIcon : LoadIconW(nullptr, IDI_APPLICATION);
     wcscpy_s(g_nid.szTip, L"WhatsApp Wrapper");
     g_trayAdded = Shell_NotifyIconW(NIM_ADD, &g_nid) == TRUE;
 }
@@ -172,8 +180,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             ResizeWebView();
         }
         return 0;
-    case WM_SIZE + 100:
-        return 0;
     case WM_TRAY:
         if (lParam == WM_LBUTTONDBLCLK) ShowWindowFromTray();
         else if (lParam == WM_RBUTTONUP) ShowContextMenu();
@@ -198,7 +204,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         case ID_ACCOUNT_1: SwitchAccount(L"account1"); return 0;
         case ID_ACCOUNT_2: SwitchAccount(L"account2"); return 0;
         case ID_EXIT:
-            g_quitting = true;
             DestroyWindow(hwnd);
             return 0;
         }
@@ -216,6 +221,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         }
         g_webview.Reset();
         g_environment.Reset();
+        if (g_trayIcon) { DestroyIcon(g_trayIcon); g_trayIcon = nullptr; }
         PostQuitMessage(0);
         return 0;
     }
@@ -238,12 +244,20 @@ int RunApplication(HINSTANCE instance, int showCommand) {
         LocalFree(argv);
     }
 
+    g_instance = instance;
+    HICON appIcon = static_cast<HICON>(LoadImageW(
+        instance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+    HICON appSmallIcon = static_cast<HICON>(LoadImageW(
+        instance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+
     WNDCLASSEXW wc{ sizeof(wc) };
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = instance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-    wc.hIconSm = wc.hIcon;
+    wc.hIcon = appIcon ? appIcon : LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIconSm = appSmallIcon ? appSmallIcon : wc.hIcon;
     wc.lpszClassName = kClassName;
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     if (!RegisterClassExW(&wc)) return 1;
@@ -253,6 +267,7 @@ int RunApplication(HINSTANCE instance, int showCommand) {
         nullptr, nullptr, instance, nullptr);
     if (!g_hwnd) return 1;
 
+    AddTrayIcon();
     ShowWindow(g_hwnd, showCommand);
     UpdateWindow(g_hwnd);
     StartWebView();

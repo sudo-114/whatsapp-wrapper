@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(WhatsAppWrapper LANGUAGES CXX)
+project(WhatsAppWrapper LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +16,9 @@ add_executable(WhatsAppWrapper WIN32
   src/main.cpp
   src/window.cpp
   src/window.h
+  src/app.rc
+  src/resource.h
+  src/app.ico
 )
 
 target_include_directories(WhatsAppWrapper PRIVATE
