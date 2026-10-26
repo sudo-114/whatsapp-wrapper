@@ -135,15 +135,12 @@ void StartWebView() {
                                         L"Edg/155.0.0.0"
                                     );
                                 }
-                            }
 
-                            ResizeWebView();
-
-                            ComPtr<ICoreWebView2Settings> settings;
-                            if (SUCCEEDED(g_webview->get_Settings(&settings)) && settings) {
                                 settings->put_AreDevToolsEnabled(FALSE);
                                 settings->put_IsStatusBarEnabled(FALSE);
                             }
+
+                            ResizeWebView();
 
                             g_webview->add_WebMessageReceived(
                                 Callback<ICoreWebView2WebMessageReceivedEventHandler>(
