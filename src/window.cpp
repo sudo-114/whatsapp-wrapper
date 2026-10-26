@@ -3,6 +3,7 @@
 #include <string>
 #include <wrl.h>
 #include <WebView2.h>
+#include <filesystem>
 #include "window.h"
 
 using Microsoft::WRL::Callback;
@@ -29,6 +30,7 @@ std::wstring g_profile;
 bool g_trayAdded = false;
 HINSTANCE g_instance = nullptr;
 HICON g_trayIcon = nullptr;
+int g_lastUnreadCount = 0;
 
 std::wstring ProfilePath(const wchar_t* profileName) {
     wchar_t localAppData[MAX_PATH]{};
@@ -39,6 +41,25 @@ std::wstring ProfilePath(const wchar_t* profileName) {
     std::error_code ec;
     std::filesystem::create_directories(base, ec);
     return base.wstring();
+}
+
+void NotifyUser(const std::wstring& title, const std::wstring& message) {
+    if (!g_hwnd) return;
+    if (!g_trayAdded) {
+        AddTrayIcon();
+    }
+
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = g_hwnd;
+    nid.uID = ID_TRAY;
+    nid.uFlags = NIF_INFO | NIF_ICON | NIF_TIP;
+    nid.hIcon = g_trayIcon ? g_trayIcon : LoadIconW(nullptr, IDI_APPLICATION);
+    nid.dwInfoFlags = NIIF_INFO;
+    wcsncpy_s(nid.szTip, L"WhatsApp Wrapper", _TRUNCATE);
+    wcsncpy_s(nid.szInfoTitle, title.c_str(), _TRUNCATE);
+    wcsncpy_s(nid.szInfo, message.c_str(), _TRUNCATE);
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
 void ResizeWebView() {
@@ -137,14 +158,70 @@ void StartWebView() {
                                 settings->put_IsStatusBarEnabled(FALSE);
                             }
 
-                            ResizeWebView();
+                            g_webview->AddScriptToExecuteOnDocumentCreated(
+                                LR"(
+                                (() => {
+                                  if (window.__waNotificationHooked) return;
+                                  window.__waNotificationHooked = true;
+                                  const poll = () => {
+                                    try {
+                                      if (!window.chrome || !window.chrome.webview) return;
+                                      const title = document.title || '';
+                                      const match = title.match(/^\((\d+)\)\s*WhatsApp/i);
+                                      const unread = match ? Number(match[1]) : 0;
+                                      if (unread > 0 && unread !== window.__waLastUnread) {
+                                        window.chrome.webview.postMessage(JSON.stringify({
+                                          type: 'wa_notification',
+                                          unread: unread,
+                                          title: title
+                                        }));
+                                      }
+                                      window.__waLastUnread = unread;
+                                    } catch (e) {}
+                                  };
+                                  setInterval(poll, 1000);
+                                })();
+                                )",
+                                nullptr);
 
                             g_webview->add_WebMessageReceived(
                                 Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs*) -> HRESULT {
+                                    [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                                        if (!args) return S_OK;
+
+                                        LPWSTR message = nullptr;
+                                        if (FAILED(args->get_WebMessageAsString(&message)) || !message) {
+                                            return S_OK;
+                                        }
+
+                                        std::wstring payload = message;
+                                        CoTaskMemFree(message);
+
+                                        const std::wstring key = L"\"type\":\"wa_notification\"";
+                                        if (payload.find(key) == std::wstring::npos) {
+                                            return S_OK;
+                                        }
+
+                                        const std::wstring unreadKey = L"\"unread\":";
+                                        size_t pos = payload.find(unreadKey);
+                                        if (pos != std::wstring::npos) {
+                                            pos += unreadKey.size();
+                                            while (pos < payload.size() && payload[pos] == L' ') ++pos;
+                                            size_t end = pos;
+                                            while (end < payload.size() && payload[end] >= L'0' && payload[end] <= L'9') ++end;
+                                            if (pos != end) {
+                                                int unread = std::stoi(payload.substr(pos, end - pos));
+                                                if (unread > 0 && unread != g_lastUnreadCount) {
+                                                    g_lastUnreadCount = unread;
+                                                    NotifyUser(L"WhatsApp", L"You have " + std::to_wstring(unread) + L" unread message(s).");
+                                                }
+                                            }
+                                        }
+
                                         return S_OK;
                                     }).Get(), nullptr);
 
+                            ResizeWebView();
                             g_webview->Navigate(L"https://web.whatsapp.com/");
                             return S_OK;
                         }).Get());
@@ -226,7 +303,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         return DefWindowProcW(hwnd, message, wParam, lParam);
     }
     case WM_CLOSE:
-        // Closing the window minimizes to the tray; Exit in the tray menu quits.
         ShowWindow(hwnd, SW_HIDE);
         AddTrayIcon();
         return 0;
@@ -280,6 +356,7 @@ int RunApplication(HINSTANCE instance, int showCommand) {
 
     g_instance = instance;
     g_profile = requestedProfile;
+    g_lastUnreadCount = 0;
 
     HICON appIcon = static_cast<HICON>(LoadImageW(
         instance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
