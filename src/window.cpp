@@ -1,13 +1,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <shellapi.h>
 #include <string>
-#include <memory>
-#include <filesystem>
 #include <wrl.h>
 #include <WebView2.h>
 #include "window.h"
-#include "resource.h"
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -15,6 +11,7 @@ using Microsoft::WRL::ComPtr;
 namespace {
 constexpr wchar_t kClassName[] = L"WhatsAppWrapperWindow";
 constexpr UINT WM_TRAY = WM_APP + 1;
+constexpr UINT WM_SWITCH_PROFILE = WM_APP + 2;
 constexpr UINT ID_TRAY = 1001;
 constexpr UINT ID_RELOAD = 2001;
 constexpr UINT ID_ZOOM_IN = 2002;
@@ -155,8 +152,20 @@ void StartWebView() {
 }
 
 void SwitchAccount(const wchar_t* name) {
-    // Each account uses a separate WebView2 user-data folder. Restarting the
-    // view is intentional: WebView2 environments cannot change profile in place.
+    if (!name || !*name) return;
+
+    if (g_profile == name) {
+        if (g_webview) {
+            g_webview->Reload();
+        }
+        if (g_hwnd) {
+            ShowWindow(g_hwnd, SW_SHOW);
+            ShowWindow(g_hwnd, SW_RESTORE);
+            SetForegroundWindow(g_hwnd);
+        }
+        return;
+    }
+
     g_profile = name;
     if (g_controller) {
         g_controller->Close();
@@ -205,6 +214,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             return 0;
         }
         break;
+    case WM_COPYDATA: {
+        auto* cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
+        if (cds && cds->dwData == 1 && cds->lpData) {
+            const wchar_t* profile = reinterpret_cast<const wchar_t*>(cds->lpData);
+            if (profile && *profile) {
+                SwitchAccount(profile);
+            }
+            return TRUE;
+        }
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
     case WM_CLOSE:
         // Closing the window minimizes to the tray; Exit in the tray menu quits.
         ShowWindow(hwnd, SW_HIDE);
@@ -229,19 +249,38 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 int RunApplication(HINSTANCE instance, int showCommand) {
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    g_profile = L"account1";
+    std::wstring requestedProfile = L"account1";
     if (argv) {
         for (int i = 1; i < argc; ++i) {
             if (wcscmp(argv[i], L"--profile") == 0 && i + 1 < argc) {
-                if (wcscmp(argv[i + 1], L"account2") == 0) g_profile = L"account2";
-                else g_profile = L"account1";
+                requestedProfile = (wcscmp(argv[i + 1], L"account2") == 0) ? L"account2" : L"account1";
                 ++i;
             }
         }
         LocalFree(argv);
     }
 
+    HANDLE singleInstance = CreateMutexW(nullptr, TRUE, L"WhatsAppWrapperSingleInstance");
+    bool alreadyRunning = (singleInstance != nullptr) && (GetLastError() == ERROR_ALREADY_EXISTS);
+    if (alreadyRunning) {
+        HWND existing = FindWindowW(kClassName, nullptr);
+        if (existing) {
+            std::wstring profileCopy = requestedProfile;
+            COPYDATASTRUCT cds{};
+            cds.dwData = 1;
+            cds.cbData = static_cast<DWORD>((profileCopy.size() + 1) * sizeof(wchar_t));
+            cds.lpData = profileCopy.data();
+            SendMessageW(existing, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&cds));
+            ShowWindow(existing, SW_RESTORE);
+            SetForegroundWindow(existing);
+        }
+        CloseHandle(singleInstance);
+        return 0;
+    }
+
     g_instance = instance;
+    g_profile = requestedProfile;
+
     HICON appIcon = static_cast<HICON>(LoadImageW(
         instance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
         GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
@@ -274,5 +313,6 @@ int RunApplication(HINSTANCE instance, int showCommand) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    CloseHandle(singleInstance);
     return static_cast<int>(msg.wParam);
 }
